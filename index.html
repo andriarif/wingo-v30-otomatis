@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI MASTER V30 - AUTOMATIC</title>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+<style>
+/* CSS TETAP SAMA SEPERTI SEBELUMNYA */
+*{ margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI', Roboto, sans-serif; text-align: center; }
+body { background: #000; color: #fff; overflow-x: hidden; }
+#mainPanel { position: relative; width: 96%; margin: 10px auto; border-radius: 12px; padding: 4px; border: 3px solid transparent; background: linear-gradient(rgba(0,0,0,0.96), rgba(0,0,0,0.96)) padding-box, linear-gradient(135deg, #00ff00, #00ffff, #bf00ff, #ff00ff) border-box; display: flex; flex-direction: column; }
+.table-wrap { height: 350px; overflow-y: auto; border: 2px solid #fff; border-radius: 5px; background: #fff; margin: 5px 0; }
+table { width: 100%; border-collapse: collapse; color: #000; }
+th { font-size: 10px; background: #f00; color: #fff; padding: 5px; position: sticky; top: 0; }
+td { border: 1px solid #ddd; font-size: 11px; font-weight: bold; height: 30px; }
+.besar { color: #0088cc; } .kecil { color: #cc7a00; }
+.win { color: green; } .lose { color: red; } .skip-txt { color: #888; }
+.mini-sim { background: #111; padding: 10px; border-radius: 8px; margin-top: 5px; }
+.timer-container { font-size: 20px; color: #0f0; font-weight: 900; margin: 5px 0; }
+</style>
+</head>
+<body>
+
+<div id="mainPanel">
+    <div style="font-size: 14px; font-weight: 900; color: #0ff; margin-bottom: 5px;">AI MASTER V30 - SUPREME AUTO</div>
+    <div class="timer-container" id="timerBox">00:00</div>
+    <div id="statInfo" style="font-size: 10px; color: #ffd700;">Menghubungkan API...</div>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>PERIODE</th><th>PREDIKSI</th><th>MODE</th><th>ANGKA</th><th>HASIL</th><th>STATUS</th></tr></thead>
+            <tbody id="dataBody"></tbody>
+        </table>
+    </div>
+
+    <div class="mini-sim">
+        <div style="font-size: 11px; color: #fff;">
+            SALDO: <span id="dispSaldo" style="color: #0ff;">Rp 0</span> | 
+            PROFIT: <span id="dispProfit">Rp 0</span>
+        </div>
+        <div id="kompenBox" style="background: red; color: #fff; padding: 5px; margin-top: 5px; border-radius: 4px; font-weight: 900;">K0: Rp 1.000</div>
+    </div>
+</div>
+
+<script>
+let lastPeriode = ""; let dataMap = {}; let historyResult = [];
+let totalWin = 0; let totalLose = 0; let currentKompen = 0; let maxK = 0;
+let simSaldo = 0; let simBet = 1000; 
+let aiState = "WT"; // WT, SIG, REV, FLW
+let currentSide = null;
+
+// RUMUS FRAKTAL UNTUK MENCARI SIGNAL
+function buatPrediksiAI() {
+    if (historyResult.length < 3) return { prediksi: "SKIP", pola: "WT", jp: [] };
+    if (aiState !== "WT" && currentSide !== null) return { prediksi: currentSide, pola: aiState, jp: [1,3,7,9] };
+
+    const r = historyResult;
+    const len = r.length;
+    // Deteksi Lembah/Puncak
+    if (r[len-2] > r[len-3] && r[len-2] > r[len-1]) { aiState = "SIG"; currentSide = "KECIL"; return { prediksi: "KECIL", pola: "SIG", jp: [0,2,4] }; }
+    if (r[len-2] < r[len-3] && r[len-2] < r[len-1]) { aiState = "SIG"; currentSide = "BESAR"; return { prediksi: "BESAR", pola: "SIG", jp: [5,7,9] }; }
+
+    return { prediksi: "SKIP", pola: "WT", jp: [] };
+}
+
+async function cekData() {
+    try {
+        const r = await fetch("/api/get-data");
+        const json = await r.json();
+        const p = String(json.period);
+        const list = json.data.gameslist;
+
+        if (p !== "" && p > lastPeriode) {
+            // Jika ada periode baru, update periode lama
+            if (lastPeriode !== "") {
+                const prevData = list.find(g => String(g.period) === lastPeriode);
+                if (prevData) {
+                    let angka = parseInt(prevData.amount);
+                    let tipe = angka <= 4 ? "KECIL" : "BESAR";
+                    updateResult(lastPeriode, angka, tipe);
+                }
+            }
+            
+            lastPeriode = p;
+            historyResult = list.map(g => parseInt(g.amount)).reverse();
+            const ai = buatPrediksiAI();
+            dataMap[p] = ai;
+
+            // Tambah baris ke tabel
+            const tr = document.createElement("tr");
+            tr.id = "row-" + p;
+            let txt = ai.prediksi === "SKIP" ? "SKIP" : ai.prediksi;
+            tr.innerHTML = `<td>${p.slice(-4)}</td><td class="${ai.prediksi.toLowerCase()}">${txt}</td><td>${ai.pola}</td><td id="num-${p}">..</td><td id="res-${p}">..</td><td id="stat-${p}">..</td>`;
+            document.getElementById("dataBody").insertBefore(tr, document.getElementById("dataBody").firstChild);
+        }
+    } catch (e) { console.log("API Error"); }
+}
+
+function updateResult(p, angka, type) {
+    const ai = dataMap[p];
+    if (!ai || ai.prediksi === "SKIP") return;
+
+    let win = (ai.prediksi === type);
+    const statCell = document.getElementById("stat-" + p);
+    document.getElementById("num-" + p).innerText = angka;
+    document.getElementById("res-" + p).innerText = type;
+
+    if (win) {
+        totalWin++; statCell.innerHTML = '<span class="win">WIN</span>';
+        currentKompen = 0; aiState = "FLW"; currentSide = type; // WIN -> Lanjut Searah (FLW)
+    } else {
+        totalLose++; statCell.innerHTML = '<span class="lose">LOSE</span>';
+        currentKompen++; if(currentKompen > maxK) maxK = currentKompen;
+        
+        if (aiState === "SIG") { aiState = "REV"; currentSide = (ai.prediksi === "BESAR" ? "KECIL" : "BESAR"); } 
+        else { aiState = "WT"; currentSide = null; currentKompen = 0; } // REV/FLW Lose -> Putus, nunggu SIG lagi
+    }
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById("statInfo").innerText = `W: ${totalWin} | L: ${totalLose} | MAX K: ${maxK}`;
+    document.getElementById("kompenBox").innerText = `K${currentKompen}: Rp ${(simBet * Math.pow(2, currentKompen)).toLocaleString()}`;
+}
+
+setInterval(cekData, 2000);
+setInterval(() => {
+    let s = new Date().getSeconds();
+    let rem = (s < 30) ? 30 - s : 60 - s;
+    document.getElementById("timerBox").innerText = "00:" + (rem < 10 ? "0" + rem : rem);
+}, 1000);
+</script>
+</body>
+</html>
